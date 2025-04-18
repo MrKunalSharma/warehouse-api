@@ -21,41 +21,66 @@ distances = {
     ('C1', 'C3'): 5
 }
 
+def validate_input(data):
+    """Validate input data and return error messages if any"""
+    errors = []
+    
+    # Check if source exists
+    if 'source' not in data:
+        errors.append("Source warehouse is required")
+    elif data['source'] not in warehouses:
+        errors.append(f"Invalid source warehouse: {data['source']}. Valid warehouses are: C1, C2, C3")
+    
+    # Check if weight is valid
+    if 'weight' not in data:
+        errors.append("Weight is required")
+    elif not isinstance(data['weight'], (int, float)):
+        errors.append("Weight must be a number")
+    elif data['weight'] <= 0:
+        errors.append("Weight must be greater than 0")
+    
+    # Check if destination is valid
+    valid_destinations = ['L1', 'C1', 'C2', 'C3']
+    if 'destination' in data and data['destination'] not in valid_destinations:
+        errors.append(f"Invalid destination: {data['destination']}. Valid destinations are: {', '.join(valid_destinations)}")
+    
+    return errors
+
 def get_distance(start, end):
     """Get distance between two points"""
     if (start, end) in distances:
         return distances[(start, end)]
     if (end, start) in distances:
         return distances[(end, start)]
-    return float('inf')
+    return None  # Changed from float('inf') to None
 
 def calculate_delivery_cost(data):
-    """
-    Calculate the minimum delivery cost based on weight and route
-    """
-    data = json.loads(data)
+    """Calculate the minimum delivery cost based on weight and route"""
+    data = json.loads(data) if isinstance(data, str) else data
     
-    # Get source warehouse and destination
-    source = data.get('source', '')  # e.g., 'C1'
-    destination = data.get('destination', 'L1')  # Default destination is L1
-    weight = data.get('weight', 0)
+    # Validate input
+    errors = validate_input(data)
+    if errors:
+        raise ValueError({"errors": errors})
     
-    if not source or weight <= 0:
-        raise ValueError("Invalid input: source and weight are required")
+    source = data['source']
+    destination = data.get('destination', 'L1')
+    weight = data['weight']
     
-    # Calculate base cost based on weight
-    base_cost = weight * 10  # Basic rate per unit weight
-    
-    # Find the shortest path and its distance
+    # Get distance
     distance = get_distance(source, destination)
+    if distance is None:
+        raise ValueError({"errors": [f"No valid route found between {source} and {destination}"]})
     
-    # Calculate total cost
-    total_cost = base_cost + (distance * weight * 0.5)  # Distance factor
+    # Calculate costs
+    base_cost = weight * 10
+    distance_cost = distance * weight * 0.5
+    total_cost = base_cost + distance_cost
     
     return {
         'total_cost': round(total_cost, 2),
         'base_cost': round(base_cost, 2),
-        'distance_cost': round(distance * weight * 0.5, 2),
+        'distance_cost': round(distance_cost, 2),
         'route': f'{source} -> {destination}',
         'distance': distance
     }
@@ -63,11 +88,30 @@ def calculate_delivery_cost(data):
 @app.route('/calculate-cost', methods=['POST'])
 def calculate_cost():
     try:
+        if not request.is_json:
+            return jsonify({
+                'error': 'Request must be JSON',
+                'example_format': {
+                    'source': 'C1',
+                    'destination': 'L1',
+                    'weight': 100
+                }
+            }), 400
+        
         data = request.get_json()
-        result = calculate_delivery_cost(json.dumps(data))
+        result = calculate_delivery_cost(data)
         return jsonify({'result': result})
+    
+    except ValueError as e:
+        # Handle validation errors
+        error_dict = e.args[0] if isinstance(e.args[0], dict) else {'errors': [str(e)]}
+        return jsonify(error_dict), 400
     except Exception as e:
-        return jsonify({'error': str(e)}), 400
+        # Handle unexpected errors
+        return jsonify({
+            'error': 'An unexpected error occurred',
+            'message': str(e)
+        }), 500
 
 @app.route('/', methods=['GET'])
 def home():
